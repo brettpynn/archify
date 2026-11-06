@@ -141,7 +141,7 @@ class AppState: ObservableObject {
                     fileOps.extractAndSignBinaries(
                         in: duplicatedDir,
                         targetArch: selectedArch,
-                        noSign: false,
+                        noSign: true,
                         noEntitlements: !entitlements
                     )
                 }

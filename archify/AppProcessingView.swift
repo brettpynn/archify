@@ -20,8 +20,6 @@ struct AppProcessingView: View {
 
     private enum SigningMode: String, CaseIterable, Identifiable {
         case preserve = "Preserve signature"
-        case adHoc = "Re-sign locally"
-        case ldid = "Use LDID"
 
         var id: String { rawValue }
     }
@@ -225,33 +223,10 @@ struct AppProcessingView: View {
             .pickerStyle(.menu)
             .frame(maxWidth: 380, alignment: .leading)
 
-            if signingModeBinding.wrappedValue != .preserve {
-                Text(signingModeDescription)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if signingModeBinding.wrappedValue == .ldid {
-                ArchifyPathSelector(
-                    title: "External LDID executable",
-                    help: "Choose a compatible LDID executable.",
-                    systemImage: "terminal",
-                    path: $appState.ldidPath
-                ) {
-                    if let url = openExecutablePanel() {
-                        appState.ldidPath = url.path
-                    }
-                }
-
-                Toggle("Reuse extracted entitlements", isOn: $appState.entitlements)
-                    .padding(.leading, 2)
-                    .help("Reuse the copied app's existing entitlements.")
-            } else if signingModeBinding.wrappedValue == .adHoc {
-                Toggle("Reuse extracted entitlements", isOn: $appState.entitlements)
-                    .padding(.leading, 2)
-                    .help("Reuse the copied app's existing entitlements.")
-            }
+            Text("Only signature-preserving optimization is enabled. Signed apps that cannot be safely thinned are skipped.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -325,30 +300,13 @@ struct AppProcessingView: View {
 
     private var signingModeBinding: Binding<SigningMode> {
         Binding(
-            get: {
-                if appState.useLDID { return .ldid }
-                if appState.useCodesign { return .adHoc }
-                return .preserve
-            },
-            set: { mode in
-                appState.useLDID = mode == .ldid
-                appState.useCodesign = mode == .adHoc
-                if mode == .preserve {
-                    appState.entitlements = false
-                }
+            get: { .preserve },
+            set: { _ in
+                appState.useLDID = false
+                appState.useCodesign = false
+                appState.entitlements = false
             }
         )
-    }
-
-    private var signingModeDescription: String {
-        switch signingModeBinding.wrappedValue {
-        case .preserve:
-            return ""
-        case .adHoc:
-            return "Creates a local signature for the copied app."
-        case .ldid:
-            return "Uses an external LDID executable."
-        }
     }
 
     private var targetsThisMac: Bool {
@@ -578,17 +536,10 @@ struct AppProcessingView: View {
     private func startProcessing() {
         guard canProcess else { return }
 
-        if appState.useLDID {
-            guard let ldidPath = appState.findLdid() else {
-                alertMessage =
-                    "Archify could not find a compatible LDID executable. "
-                    + "Choose one in Advanced options, use ad hoc codesign, "
-                    + "or preserve the existing signature."
-                showAlert = true
-                return
-            }
-            appState.ldidPath = ldidPath
-        }
+        // Reset legacy persisted signing preferences before starting.
+        appState.useLDID = false
+        appState.useCodesign = false
+        appState.entitlements = false
 
         appState.initialAppSize = 0
         appState.finalAppSize = 0

@@ -279,6 +279,8 @@ private struct InstalledAppRow: View {
 private struct InstalledAppDetailView: View {
     let app: AppInfo
     @Environment(\.dismiss) private var dismiss
+    @State private var audit: [ArchitectureAuditEntry] = []
+    @State private var isAuditing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -321,10 +323,50 @@ private struct InstalledAppDetailView: View {
                 )
             }
 
-            Spacer()
+            Divider()
+            HStack {
+                Text("Remaining Intel slices")
+                    .font(.headline)
+                Spacer()
+                Button(isAuditing ? "Scanning…" : "Scan all binaries") {
+                    isAuditing = true
+                    let path = app.path
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let results = UniversalApps.shared.auditIntelSlices(appPath: path)
+                        DispatchQueue.main.async {
+                            audit = results
+                            isAuditing = false
+                        }
+                    }
+                }
+                .disabled(isAuditing)
+            }
+            if !audit.isEmpty {
+                let estimated = audit.reduce(UInt64(0)) { $0 &+ $1.estimatedRemovableBytes }
+                Text("\(audit.count) Universal binaries • Intel slice bytes: \(ByteCountFormatter.string(fromByteCount: Int64(estimated), countStyle: .file)). Estimate only; not guaranteed recoverable storage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(audit) { entry in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.path).font(.caption.monospaced()).textSelection(.enabled)
+                                Text("Intel slice: \(ByteCountFormatter.string(fromByteCount: Int64(entry.estimatedRemovableBytes), countStyle: .file)) • \(entry.isSealedResource ? "Sealed resource — excluded by preserve mode" : "Candidate — signature validation required")")
+                                    .font(.caption2)
+                                    .foregroundStyle(entry.isSealedResource ? .orange : .secondary)
+                            }
+                        }
+                    }
+                }
+            } else if !isAuditing {
+                Text("Run a read-only scan to see nested Universal binaries and signature-related exclusions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
         }
         .padding(24)
-        .frame(width: 520, height: 310)
+        .frame(width: 720, height: 540)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 

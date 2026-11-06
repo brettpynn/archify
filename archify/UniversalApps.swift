@@ -14,6 +14,16 @@ struct ApplicationArchitectureScanResult {
     let fileCount: Int
 }
 
+// Read-only audit: include every regular Mach-O file, even in nested frameworks
+// and LaunchAgents. This intentionally reports sealed binaries as blocked.
+struct ArchitectureAuditEntry: Identifiable {
+    let path: String
+    let originalBytes: UInt64
+    let estimatedRemovableBytes: UInt64
+    let isSealedResource: Bool
+    var id: String { path }
+}
+
 class UniversalApps {
     static let shared = UniversalApps()
     private static let minimumUniversalBinarySize: UInt64 = 4096
@@ -106,6 +116,38 @@ class UniversalApps {
         default:
             return architecture
         }
+    }
+
+    func auditIntelSlices(appPath: String) -> [ArchitectureAuditEntry] {
+        let root = URL(fileURLWithPath: appPath, isDirectory: true)
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        guard let enumerator = fileManager.enumerator(
+            at: root, includingPropertiesForKeys: Array(keys), options: []
+        ) else { return [] }
+        let sealed = SealedResourceIndex(applicationPath: appPath)
+        var entries: [ArchitectureAuditEntry] = []
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true,
+                  values.isSymbolicLink != true else { continue }
+            let bytes = UInt64(values.fileSize ?? 0)
+            guard bytes >= 4096,
+                  let slices = MachOInspector.slices(atPath: url.path),
+                  slices.count > 1,
+                  slices.contains(where: { $0.architecture == "x86_64" || $0.architecture == "x86_64h" }),
+                  slices.contains(where: { $0.architecture == "arm64" })
+            else { continue }
+            let intelBytes = slices.filter {
+                $0.architecture == "x86_64" || $0.architecture == "x86_64h"
+            }.reduce(UInt64(0)) { $0 &+ $1.size }
+            entries.append(ArchitectureAuditEntry(
+                path: String(url.path.dropFirst(appPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                originalBytes: bytes,
+                estimatedRemovableBytes: min(intelBytes, bytes),
+                isSealedResource: sealed.isSealedResource(url.path)
+            ))
+        }
+        return entries.sorted { $0.estimatedRemovableBytes > $1.estimatedRemovableBytes }
     }
 
     func calculateUnneededArchSize(

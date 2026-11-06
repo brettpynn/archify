@@ -38,12 +38,17 @@ class FileOperations {
     func extractAndSignBinaries(
         in dir: String, targetArch: String, noSign: Bool, noEntitlements: Bool
     ) {
+        // Security-first fork: never replace the original developer identity.
+        // The UI no longer offers ad-hoc/LDID signing, but also enforce this
+        // at the operation boundary for callers that bypass the UI.
+        guard noSign, !appState.useCodesign, !appState.useLDID else {
+            appState.appendLog("Blocked: re-signing changes the developer identity. Select Preserve signature.")
+            DispatchQueue.main.async { self.appState.isProcessing = false }
+            return
+        }
         let universalApps = UniversalApps()
-        // Ad-hoc codesign reseals the whole copy afterwards, so thinning may
-        // touch binaries sealed as resources. LDID only signs the changed
-        // binaries and cannot repair a bundle seal.
-        let signaturePolicy: ApplicationThinner.SignaturePolicy =
-            !noSign && appState.useCodesign ? .willResign : .preserve
+        let originalSize = universalApps.calculateDirectorySize(path: dir)
+        let signaturePolicy: ApplicationThinner.SignaturePolicy = .preserve
 
         applicationThinner.thinApplicationReportingChanges(
             atPath: dir,
@@ -60,39 +65,12 @@ class FileOperations {
                 return
             }
 
-            var signingSucceeded = true
-
-            if !noSign, self.appState.useLDID {
-                guard let ldidPath = self.appState.findLdid() else {
-                    self.appState.appendLog("A compatible ldid executable was not found.")
-                    signingSucceeded = false
-                    self.finishProcessing(
-                        directory: dir,
-                        universalApps: universalApps,
-                        success: signingSucceeded
-                    )
-                    return
-                }
-
-                let signer = Signer(appState: self.appState, ldidPath: ldidPath)
-                for path in changedPaths {
-                    if !signer.signBin(bin: path, noEnt: noEntitlements) {
-                        signingSucceeded = false
-                    }
-                }
-            }
-
-            if !noSign, self.appState.useCodesign {
-                let signer = Signer(appState: self.appState, ldidPath: "")
-                if !signer.signApp(appPath: dir, noEnt: noEntitlements) {
-                    signingSucceeded = false
-                }
-            }
-
+            self.appState.appendLog("ARM64 thinning completed: \(changedPaths.count) binaries modified.")
+            self.appState.appendLog("Original app size: \(originalSize) bytes")
             self.finishProcessing(
                 directory: dir,
                 universalApps: universalApps,
-                success: signingSucceeded
+                success: true
             )
         }
     }

@@ -835,6 +835,15 @@ final class ApplicationThinner {
             requireSignatureValidation = false
         }
 
+        // A pre-existing invalid/unsigned bundle cannot satisfy the user's
+        // identity-preservation requirement. Fail closed rather than treating
+        // absence of a valid signature as permission to alter everything.
+        if case .preserve = signaturePolicy, !requireSignatureValidation {
+            cleanupTransactionDirectory(transactionDirectory)
+            completion(nil, "Original application signature is missing or invalid; refusing to thin in preserve mode.")
+            return
+        }
+
         guard let enumerator = fileManager.enumerator(atPath: appPath) else {
             cleanupTransactionDirectory(transactionDirectory)
             completion(nil, "Failed to enumerate the application bundle.")

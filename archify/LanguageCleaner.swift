@@ -341,6 +341,15 @@ final class LanguageCleaner: ObservableObject {
     // MARK: - Removal
 
     func removeSelected() {
+        // Disabled until privileged and unprivileged deletion both support
+        // durable rollback. A failed recursive deletion can otherwise leave
+        // a signed app partially modified with no recovery path.
+        removalFailures = [(
+            path: "Language cleanup",
+            reason: "Disabled for safety: transactional backup and crash recovery are not implemented yet. No files were removed."
+        )]
+        removedFilesLog = "Language removal blocked: recoverable transactions are required before deletion.\n"
+        return
         let removalItems = selectedRemovalItems()
         guard !removalItems.isEmpty, !isRemoving else { return }
 
